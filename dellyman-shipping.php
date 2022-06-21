@@ -200,19 +200,17 @@ class DellymanOrders extends WP_List_Table
                         $store_info = dokan_get_store_info($dokan_id);
                         return $store_info['store_name'];
                   case 'item':
-                        $order = $item['dellyman_order_id'];
-                        global $wpdb;
-                        $table_name = $wpdb->prefix . "woocommerce_dellyman_shipped_products"; 
-                        $products = $wpdb->get_results("SELECT * FROM $table_name WHERE dellyman_order_id = '$order'",OBJECT);
+                        $order = new WC_Order($item['order_id']); // Order id
+                        //Get product Names
                         $allProductNames = "";
-                        foreach ($products as $key => $shipProduct) {
-                           if ($key == 0) {
-                                 $allProductNames = $shipProduct->product_name."(". round($shipProduct->quantity)  .")";
-                          }else{
-                              $allProductNames = $allProductNames .",". $shipProduct->product_name."(". round($shipProduct->quantity) .")";
-                          }
+                        foreach ($order->get_items() as $key => $item) {
+                            if ($key == 0) {
+                                $allProductNames = preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
+                            }else{
+                                $allProductNames = $allProductNames .",". preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
+                            }
                         }
-                       $productNames = "Total item(s)-". count($products) ." Products - " .$allProductNames;
+                        $productNames = "Total item(s)-". count($order->get_items()) ." Products - " .$allProductNames;
                         return $productNames; 
                     case 'status':        
                         global $wpdb;
@@ -446,8 +444,7 @@ function sendOrderToDellyman($order_id , $vendor_id){
     $carrier = "bike";
     //send order
     $feedback = bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickupAddress,$vendorphone,$custPhone, $store_city,$customer_city );
-    // echo($order->user_id);
-    // print_r( $store_info);
+   
     if ($feedback['ResponseCode'] == 100) {
         $dellyman_orderid = $feedback['OrderID'];
         $Reference = $feedback['Reference'];
@@ -461,7 +458,7 @@ function sendOrderToDellyman($order_id , $vendor_id){
                 'order_id' => $order_id,
                 'reference_id' => $Reference,
                 'dellyman_order_id' =>$dellyman_orderid,
-                'user_id' => $order->user_id, 
+                'user_id' => $vendor_id, 
             ) 
         );
         
