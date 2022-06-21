@@ -404,7 +404,7 @@ function post_products_dellyman_request($order_id){
         foreach($sub_orders as $sub_order) {
             $child_order = wc_get_order($sub_order);
             $vendor_id = dokan_get_seller_id_by_order($child_order);
-            sendOrderToDellyman($sub_order , $vendor_id);
+            sendOrderToDellyman($child_order , $vendor_id);
         }
 
     else:
