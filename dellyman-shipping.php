@@ -171,7 +171,7 @@ class DellymanOrders extends WP_List_Table
             $this->_column_headers = array($columns, $hidden, $sortable);
 
             /* pagination */
-            $per_page = 20;
+            $per_page = 10;
             $current_page = $this->get_pagenum();
             $total_items = count($this->orders);
 
@@ -463,7 +463,7 @@ function sendOrderToDellyman($order_id , $vendor_id){
         );
         
         $order = new WC_Order($order_id);
-        $order->update_status("wc-ready-to-ship", 'Order moved to fully shipped by delivery', FALSE); 
+        $order->update_status("wc-fully-shipped", 'Order moved to fully shipped by delivery', FALSE); 
     }
 
 }
