@@ -744,7 +744,7 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                         "IsProductOrder"                  => $IsProductOrder,
                         "IsProductInsurance"              => $IsProductInsurance,
                         "InsuranceAmount"                 => $InsuranceAmount,
-                        "IsInstantDelivery"               => $IsInstantDelivery
+                        "IsInstantDelivery"               => 0,
                     );
                     $data = json_encode($argdata);
                     
@@ -774,7 +774,7 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                         {
 
                             $shippingFee = $shippingFee + $response['Companies'][0]['PayablePrice'];
-                            array_push($distance, ['distance' => $response['Distance']]);
+                            array_push($distance, ['store_name'=> $store_info['store_name']  ,'distance' => $response['Distance']]);
                         }
                         else
                         {
@@ -799,12 +799,13 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                * @return void
                */
               public function calculate_shipping( $package = array() ) {
-     
+                
+                 
+                $address    = $package["destination"]["address"];
                 $state    = $package["destination"]["state"];
                 $city     = $package["destination"]["city"];  
-                $country  = $package["destination"]["country"];
     
-                $DeliveryAddress        = array($city.','.$state.','.$country);
+                $DeliveryAddress        = array($address.','.$city.','.$state);
                 $ProductAmount          = array();
                 $PickupRequestedTime    = '06 AM to 09 PM';
                 $PickupRequestedDate    = date("d/m/Y");
@@ -814,10 +815,19 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                     {
                     
                         $cost = $quotes['PayablePrice'];
+                        $storeDistances = "";
+
+                        foreach($quotes['distance'] as $key => $distance){
+                            if ($key == 0) {
+                                $storeDistances = $distance['store_name'] ."(". round($distance['distance'],2) ."KM)";
+                            }else{
+                                $storeDistances = $storeDistances .", ". $distance['store_name'] ."(". round($distance['distance'],2) ."KM)";
+                            }
+                        }
 
                         $rate = array(
                           'id' => $this->id,
-                          'label' => $this->title,
+                          'label' => "Delivery distance is ". $storeDistances ,
                           'cost' => $cost
                         );
                     
