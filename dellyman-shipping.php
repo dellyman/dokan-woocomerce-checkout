@@ -400,13 +400,7 @@ function bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickup
 function post_products_dellyman_request($order_id){
 
     if(!dokan_get_seller_id_by_order( $order_id )):
-        $sub_orders = dokan_get_suborder_ids_by($order_id);
-        foreach($sub_orders as $sub_order) {
-            $child_order = wc_get_order($sub_order);
-            $vendor_id = dokan_get_seller_id_by_order($child_order);
-            sendOrderToDellyman($child_order , $vendor_id);
-        }
-
+        sendMutipleOrderToDellyman($order_id);
     else:
         $vendor_id = dokan_get_seller_id_by_order( $order_id );
         sendOrderToDellyman($order_id , $vendor_id);
@@ -466,6 +460,131 @@ function sendOrderToDellyman($order_id , $vendor_id){
         $order->update_status("wc-fully-shipped", 'Order moved to fully shipped by delivery', FALSE); 
     }
 
+}
+
+
+function sendMutipleOrderToDellyman($order_id){
+    $sub_orders = dokan_get_suborder_ids_by($order_id);
+    $orders = [];
+    $vendors = [];
+    foreach($sub_orders as $sub_order) {
+        $child_order = wc_get_order($sub_order);
+        $vendor_id = dokan_get_seller_id_by_order($child_order);
+        $order = new WC_Order($sub_order); // Order id
+        $shipping_address = $order->get_address('billing'); 
+    
+        //Get product Names
+        $allProductNames = "";
+        foreach ($order->get_items() as $key => $item) {
+            if ($key == 0) {
+                $allProductNames = preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
+            }else{
+                $allProductNames = $allProductNames .",". preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
+            }
+        }
+        $productNames = "Total item(s)-". count($order->get_items()) ." Products - " .$allProductNames;
+            
+        //Get Authentciation
+       
+        $store_info = dokan_get_store_info($vendor_id);
+        $store_name = $store_info['store_name'];
+        $store_address = $store_info['address']['street_1'];
+        $store_city = $store_info['address']['city'];
+        $pickupAddress = $store_address .', '. $store_city;
+        $vendorphone = $store_info['phone'];
+        $custPhone =  $order->get_billing_phone();
+        $customer_city = $order->get_billing_city();
+        $date =  date("m/d/Y");
+        $single = [
+            "CompanyID" => 762,
+            "PaymentMode" => "pickup",
+            "Vehicle" => 1,
+            "PickUpContactName" => $store_name,
+            "PickUpContactNumber" => $vendorphone,
+            "PickUpGooglePlaceAddress" => $pickupAddress,
+            "PickUpLandmark" => "",
+            "IsInstantDelivery" => 0,
+            "PickUpRequestedTime" => "06 AM to 09 PM",
+            "PickUpRequestedDate" => $date,
+            "DeliveryRequestedTime" => "06 AM to 09 PM",
+            "Packages" => [
+                [
+                    "PackageDescription" =>  $productNames,
+                    "DeliveryContactName" =>  $shipping_address['first_name'] ." ". $shipping_address['last_name'],
+                    "DeliveryContactNumber" =>  $custPhone ,
+                    "DeliveryGooglePlaceAddress" => $shipping_address['address_1']." ,".$shipping_address['city'],
+                    "DeliveryLandmark" => "",
+                    "DeliveryState" => "Lagos",
+                    "DeliveryCity" =>  $customer_city,
+                    "PickUpCity" => $store_city,
+                    "PickUpState" => "Lagos"
+                ]
+            ]
+        ];
+        array_push($vendors,$vendor_id);
+        array_push($orders,$single);
+    }
+
+    $argdata = array(
+        "CustomerID" => 881,
+        "Orders" => $orders
+    );
+
+    $data = json_encode($argdata);
+    //Send mutiple order
+    global $wpdb;
+    $table_name = $wpdb->prefix . "woocommerce_dellyman_credentials"; 
+    $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
+    $ApiKey =  (!empty($user->API_KEY)) ? ($user->API_KEY) : ('');
+    $response = wp_remote_post("https://dev.dellyman.com/api/v3.0/BookOrders", array(
+            'method' => 'POST',
+            'timeout' => 30,
+            'redirection' => 10,
+            'httpversion' => '1.1',
+            'blocking' => true,
+            'headers' => array(
+            'Authorization' => 'Bearer ' . $ApiKey,
+            'Cache-Control' => 'no-cache',
+            'Content-Type' => 'application/json',
+            ),
+            'body' => $data,
+            'cookies' => array()
+        )
+    );
+    if ( is_wp_error( $response ) ) {
+        $error_message = $response->get_error_message();
+        return array('status' => 'error', 'message' => __( 'Something Went Wrong : ', 'nv-dellyman' ), 'value' => $error_message);
+    }else {
+        $response = $response['body'];
+        $response = json_decode($response, true);
+        if($response['ResponseCode'] == '100' && $response['ResponseMessage'] == 'Success')
+        {
+            $dellymanOrders = $response['Data'];
+
+            foreach($dellymanOrders as $key => $order){
+                $dellyman_orderid = $order['OrderID'];
+                $Reference = $order['Reference'];
+                //Insert into delivery orders in table
+                global $wpdb;
+                $woocommerceOrder = $sub_orders[$key]->ID;
+                $vendor_id = $vendors[$key];
+                $table_name = $wpdb->prefix . "woocommerce_dellyman_orders";
+                $wpdb->insert( 
+                    $table_name, 
+                    array( 
+                        'time' => current_time('mysql'), 
+                        'order_id' => $woocommerceOrder,
+                        'reference_id' => $Reference,
+                        'dellyman_order_id' =>$dellyman_orderid,
+                        'user_id' => $vendor_id , 
+                    ) 
+                );
+                
+                $order = new WC_Order($sub_orders[$key]);
+                $order->update_status("wc-fully-shipped", 'Order moved to fully shipped by delivery', FALSE); 
+            }
+        }
+    }
 }
 
 function custom_dellyman_post_order_status() {
@@ -696,7 +815,7 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                   );
 
               }
-
+              
 
               /**
                * This function is used to fetch the dellyman shipping quotes.
@@ -705,89 +824,62 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                * @param mixed $package
                * @return void
                */
-              public function get_dellyman_customer_getquotes($PaymentMode = "pickup",$VehicleID = 1,$PickupRequestedTime,$PickupRequestedDate,$DeliveryAddress,$IsProductOrder = 0,$IsProductInsurance = 0,$InsuranceAmount = 0,$IsInstantDelivery = 1)
+              public function get_dellyman_customer_getquotes($pickupAddress,$PickupRequestedTime,$PickupRequestedDate,$DeliveryAddress)
               {
                 global $wpdb;
                 $table_name = $wpdb->prefix . "woocommerce_dellyman_credentials"; 
                 $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
                 $ApiKey =  (!empty($user->API_KEY)) ? ($user->API_KEY) : ('');
-
-                $vendors = array(); // Initializing
-
-                // Loop through cart items
-                foreach ( WC()->cart->cart_contents as $item_key => $cart_item ) {
-                    $vendor_id  = get_post_field( 'post_author', $cart_item['product_id']);
-                    array_push($vendors, $vendor_id);
-                }
-            
-                $vendors = array_unique($vendors);
-                
-                $shippingFee = 0;
-                $distance = [];
-                // Loop through sorted items key
-                foreach($vendors as $key => $vendor_id ) {
-                    $store_info = dokan_get_store_info($vendor_id);
-                    $store_address = $store_info['address']['street_1'];
-                    $store_city = $store_info['address']['city'];
-                    $pickupAddress = $store_address .', '. $store_city;
-
-                               
-                    $argdata = array(
-                        "PaymentMode"                     => $PaymentMode,
-                        "VehicleID"                       => $VehicleID,
-                        "PickupRequestedTime"             => $PickupRequestedTime,
-                        "PickupRequestedDate"             => $PickupRequestedDate,
-                        "PickupAddress"                   => $pickupAddress,
-                        "DeliveryAddress"                 => $DeliveryAddress,
-                        "ProductAmount"                   => strval(WC()->cart->get_cart_total()),
-                        "PackageWeight"                   => "1kg",
-                        "IsProductOrder"                  => $IsProductOrder,
-                        "IsProductInsurance"              => $IsProductInsurance,
-                        "InsuranceAmount"                 => $InsuranceAmount,
-                        "IsInstantDelivery"               => 0,
-                    );
-                    $data = json_encode($argdata);
+                 
+                $argdata = array(
+                    "PaymentMode"                     => "online",
+                    "VehicleID"                       => 1,
+                    "PickupRequestedTime"             => $PickupRequestedTime,
+                    "PickupRequestedDate"             => $PickupRequestedDate,
+                    "PickupAddress"                   => $pickupAddress,
+                    "DeliveryAddress"                 => $DeliveryAddress,
+                    "ProductAmount"                   => strval(WC()->cart->get_cart_total()),
+                    "PackageWeight"                   => "1kg",
+                    "IsProductOrder"                  => 0,
+                    "IsProductInsurance"              => 0,
+                    "InsuranceAmount"                 => 0,
+                    "IsInstantDelivery"               => 0,
+                );
                     
-                    $response = wp_remote_post("https://dev.dellyman.com/api/v3.0/GetQuotes", array(
-                        'method' => 'POST',
-                        'timeout' => 30,
-                        'redirection' => 10,
-                        'httpversion' => '1.1',
-                        'blocking' => true,
-                        'headers' => array(
-                        'Authorization' => 'Bearer ' . $ApiKey,
-                        'Cache-Control' => 'no-cache',
-                        'Content-Type' => 'application/json',
-                        ),
-                        'body' => $data,
-                        'cookies' => array()
-                    )
-                    );
+                $data = json_encode($argdata);
+                    
+                $response = wp_remote_post("https://dev.dellyman.com/api/v3.0/GetQuotes", array(
+                    'method' => 'POST',
+                    'timeout' => 30,
+                    'redirection' => 10,
+                    'httpversion' => '1.1',
+                    'blocking' => true,
+                    'headers' => array(
+                    'Authorization' => 'Bearer ' . $ApiKey,
+                    'Cache-Control' => 'no-cache',
+                    'Content-Type' => 'application/json',
+                    ),
+                    'body' => $data,
+                    'cookies' => array()
+                )
+                );
 
-                    if ( is_wp_error( $response ) ) {
-                        $error_message = $response->get_error_message();
-                        return array('status' => 'error', 'message' => __( 'Something Went Wrong : ', 'nv-dellyman' ), 'value' => $error_message);
-                    }else {
-                        $response = $response['body'];
-                        $response = json_decode($response, true);
-                        if($response['ResponseCode'] == '100' && $response['ResponseMessage'] == 'Success')
-                        {
+                if ( is_wp_error( $response ) ) {
+                    $error_message = $response->get_error_message();
+                    return array('status' => 'error', 'message' => __( 'Something Went Wrong : ', 'nv-dellyman' ), 'value' => $error_message);
+                }else {
+                    $response = $response['body'];
+                    $response = json_decode($response, true);
+                    if($response['ResponseCode'] == '100' && $response['ResponseMessage'] == 'Success')
+                    {
 
-                            $shippingFee = $shippingFee + $response['Companies'][0]['PayablePrice'];
-                            array_push($distance, ['store_name'=> $store_info['store_name']  ,'distance' => $response['Distance']]);
-                        }
-                        else
-                        {
-                            return array('status' => 'error', 'message' => __( 'Error : ', 'nv-dellyman' ), 'value' => $response['ResponseMessage']);
-                        }
+                        return array('status' => 'success', 'message' => __( 'Get Quote Successfull : ', 'nv-dellyman' ), 'PayablePrice' => $response['Companies'][0]['PayablePrice'], 'distance' => $response['Distance']);
                     }
-
+                    else
+                    {
+                        return array('status' => 'error', 'message' => __( 'Error : ', 'nv-dellyman' ), 'value' => $response['ResponseMessage']);
+                    }
                 }
-
-                return array('status' => 'success', 'message' => __( 'Get Quote Successfull : ', 'nv-dellyman' ), 'PayablePrice' => $shippingFee , 'distance' => $distance ,);
-                
-
-
      
               }
 
@@ -800,47 +892,44 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                */
               public function calculate_shipping( $package = array() ) {
                 
+                error_log(print_r($package));
                  
                 $address    = $package["destination"]["address"];
                 $state    = $package["destination"]["state"];
                 $city     = $package["destination"]["city"];  
-    
+                $vendor_id = $package["seller_id"];
+
+                $store_info = dokan_get_store_info($vendor_id);
+                $store_address = $store_info['address']['street_1'];
+                $store_city = $store_info['address']['city'];
+                $pickupAddress = $store_address .', '. $store_city;
+
                 $DeliveryAddress        = array($address.','.$city.','.$state);
-                $ProductAmount          = array();
                 $PickupRequestedTime    = '06 AM to 09 PM';
                 $PickupRequestedDate    = date("d/m/Y");
-                $quotes                 = $this->get_dellyman_customer_getquotes($PaymentMode = "pickup",$VehicleID = 1,$PickupRequestedTime,$PickupRequestedDate,$DeliveryAddress,$IsProductOrder = 0,$IsProductInsurance = 0,$InsuranceAmount = 0,$IsInstantDelivery = 1);
-                    
+                $quotes                 = $this->get_dellyman_customer_getquotes($pickupAddress,$PickupRequestedTime,$PickupRequestedDate,$DeliveryAddress);
+                 
+            
                 if($quotes['status'] == "success")
                     {
                     
                         $cost = $quotes['PayablePrice'];
-                        $storeDistances = "";
-
-                        foreach($quotes['distance'] as $key => $distance){
-                            if ($key == 0) {
-                                $storeDistances = $distance['store_name'] ."(". round($distance['distance'],2) ."KM)";
-                            }else{
-                                $storeDistances = $storeDistances .", ". $distance['store_name'] ."(". round($distance['distance'],2) ."KM)";
-                            }
-                        }
-
                         $rate = array(
-                          'id' => $this->id,
-                          'label' => "Delivery distance is ". $storeDistances ,
-                          'cost' => $cost
+                            'id' => $this->id,
+                            'label' => "Delivery by Dellyman (". $quotes['distance']  ."KM)",
+                            'cost' => $cost,
+                            'meta_data' => [
+                                "Distance" =>  $quotes['distance']
+                            ]
                         );
                     
                         $this->add_rate( $rate );
-
-                        
-                        //wc_add_notice( $quotes['message'].$quotes['PayablePrice'], 'notice');
                     }
                     else
                     {
                         wc_add_notice( $quotes['message'].$quotes['value'], 'notice');
                     }                
-              }
+            }
           }
       }
   }
