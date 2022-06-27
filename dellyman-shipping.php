@@ -412,7 +412,7 @@ function sendOrderToDellyman($order_id , $vendor_id){
 
     //Get Order Addresss 
     $order = new WC_Order($order_id); // Order id
-    $shipping_address = $order->get_address('billing'); 
+    $shipping_address = $order->get_address('shipping'); 
 
     //Get product Names
     $allProductNames = "";
@@ -471,7 +471,7 @@ function sendMutipleOrderToDellyman($order_id){
         $child_order = wc_get_order($sub_order);
         $vendor_id = dokan_get_seller_id_by_order($child_order);
         $order = new WC_Order($sub_order); // Order id
-        $shipping_address = $order->get_address('billing'); 
+        $shipping_address = $order->get_address('shipping'); 
     
         //Get product Names
         $allProductNames = "";
@@ -641,7 +641,6 @@ add_filter( 'wc_order_statuses', 'add_dellyman_custom_order_statuses' );
 function change_status_order(WP_REST_Request $request) {
     // In practice this function would fetch the desired data. Here we are just making stuff up.
     $key  = $request->get_header('X-Dellyman-Signature');
-    error_log($key);
     global $wpdb;
     $table_name = $wpdb->prefix . "woocommerce_dellyman_credentials"; 
     $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
@@ -838,7 +837,7 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                     "PickupRequestedDate"             => $PickupRequestedDate,
                     "PickupAddress"                   => $pickupAddress,
                     "DeliveryAddress"                 => $DeliveryAddress,
-                    "ProductAmount"                   => strval(WC()->cart->get_cart_total()),
+                    "ProductAmount"                   => 0,
                     "PackageWeight"                   => "1kg",
                     "IsProductOrder"                  => 0,
                     "IsProductInsurance"              => 0,
@@ -892,7 +891,6 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                */
               public function calculate_shipping( $package = array() ) {
                 
-                error_log(print_r($package));
                  
                 $address    = $package["destination"]["address"];
                 $state    = $package["destination"]["state"];
