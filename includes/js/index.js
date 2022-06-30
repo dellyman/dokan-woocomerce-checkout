@@ -174,7 +174,7 @@ jQuery("#send-request").submit(function (e) {
         url: frontendajax.ajaxurl, // Since WP 2.8 ajaxurl is always defined and points to admin-ajax.php
         type: 'POST',
         data: {
-            'action': 'post_products_dellyman_request',
+            'action': 'admin_products_dellyman_request',
             'order' : order,
             'products':checkboxes,
             'carrier': carrier

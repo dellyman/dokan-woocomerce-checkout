@@ -3,9 +3,11 @@
         $seller = wp_get_current_user(); 
         global $wpdb;
         $table_name = $wpdb->prefix . "wc_order_stats"; 
-        $orders = $wpdb->get_results("SELECT * FROM $table_name WHERE (status = 'wc-completed' OR status ='wc-processing'  OR status = 'wc-ready-to-ship'  OR status = 'wc-partially-deliver' OR status = 'wc-partially-shipped') ");
+        $table_name2 = $wpdb->prefix . "dokan_orders"; 
+        $orders = $wpdb->get_results("SELECT order_id FROM $table_name WHERE status = 'wc-failed-delivery' UNION       
+        SELECT order_id FROM $table_name2  WHERE order_status = 'wc-failed-delivery'");
         $orders = json_decode(json_encode($orders),true);
-        $response = wp_remote_get( 'https://dev.dellyman.com/api/v3.0/Vehicles' );
+        $response = wp_remote_get('https://dev.dellyman.com/api/v3.0/Vehicles');
         $carriers = wp_remote_retrieve_body( $response );
         ?>
         <div class="mt-8">
@@ -16,7 +18,7 @@
                 <div ></div>
                 <div class="section">
                     <h3 class="mb-3" >Step 1: Select order</h3>
-                        Only orders with the fulfulment status of, Ready to Ship, Partially Shipped, Partially Delivered will be listed below.
+                        Only orders with the fulfulment status of Delivery cancelled will be listed below.
                         <div class="mt-3">
                             <label for="orders"  class="label" >Select Order</label>
                             <select name="order" id="order" class="input-text" autocomplete="off">
@@ -36,10 +38,10 @@
                 <div class="mt-3">
                     <label for="vechicle" class="label" > Select carrier</label>
                     <select  name="carrier" id="carrier" class="input-text" disabled>
-                            <option value="carrier">Select Carrier</option>      
-                            <?php foreach (json_decode($carriers,true) as $key => $carrier) {?>
-                                <option value="<?php echo $carrier['Name'] ?>"><?php echo $carrier['Name'] ?></option> 
-                                <?php } ?> 
+                        <option value="carrier">Select Carrier</option>      
+                        <?php foreach (json_decode($carriers,true) as $key => $carrier) {?>
+                            <option value="<?php echo $carrier['Name'] ?>"><?php echo $carrier['Name'] ?></option> 
+                            <?php } ?> 
                 </select>
                 </div>
                 </div>

@@ -227,7 +227,8 @@ class DellymanOrders extends WP_List_Table
                             ]
                         ));
                         $status = json_decode(wp_remote_retrieve_body($response),true);
-                        return $status['OrderStatus'];
+                        $note = (!empty($status['Note'])) ? '<br>' . $status['Note']  : "";
+                        return $status['OrderStatus'] . $note;
                     case 'time':
                         return date("F j, Y, g:i a", strtotime($item['time'])); 
                   default:
@@ -396,17 +397,81 @@ function bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickup
     return json_decode($NoTags,true);
 }
 
+function get_products_ajax_request(){
+    if(isset($_REQUEST['orderid'])){
+        $orderid = $_REQUEST['orderid'];
+        global $wpdb;
+        $table_name = $wpdb->prefix . "woocommerce_dellyman_products"; 
+        $products = $wpdb->get_results("SELECT * FROM $table_name WHERE order_id = '$orderid' ",OBJECT);
+        
+        if(empty($products)){
+            $order = wc_get_order($orderid); 
+            foreach ($order->get_items() as $key => $item ) {
+                $productdata  = $item->get_product();
+                $seller = wp_get_current_user();
+                $wpdb->insert( 
+                    $table_name, 
+                    array( 
+                        'created_at' => current_time('mysql'), 
+                        'product_id'=>$item->get_product_id(),
+                        'order_id' => $orderid, 
+                        'product_name' => preg_replace("/\'s+/", "", $item->get_name()), 
+                        'sku' => $productdata->get_sku(),
+                        'quantity' =>  $item->get_quantity(),
+                        'user_id' => $seller->ID, 
+                        'shipquantity' => 0,
+                        'price'=> $productdata->get_price()
+                    ) 
+                ); 
+            }
+          
+        }
+
+        $products = $wpdb->get_results("SELECT * FROM $table_name WHERE order_id = '$orderid' ",OBJECT);
+
+        //Customer
+        $shippingOrder = new WC_Order($orderid);
+        $shipping_address = $shippingOrder->get_address('billing'); 
+        $customerName =  $shippingOrder->billing_first_name .' '. $shippingOrder->billing_last_name;
+        $customerPhone = $shippingOrder ->billing_phone;
+        $custData = [
+            'address' => $shipping_address,
+            'name' => $customerName,
+            'customerPhone' => $customerPhone
+        ];
+        $data = ['products' => $products , 'customerdata' => $custData ];
+        wp_send_json($data);
+    }
+    wp_die(); 
+}
+add_action( 'wp_ajax_get_products_ajax_request', 'get_products_ajax_request' );
+add_action( 'wp_ajax_nopriv_get_products_ajax_request', 'get_products_ajax_request' ); 
+
+
 
 function post_products_dellyman_request($order_id){
 
     if(!dokan_get_seller_id_by_order( $order_id )):
-        sendMutipleOrderToDellyman($order_id);
+        $sub_orders = dokan_get_suborder_ids_by($order_id);
+        global $wpdb;
+        $table_name = $wpdb->prefix . "woocommerce_dellyman_orders";
+        $firstOrder =$sub_orders[0]->ID;
+        $order = $wpdb->get_row("SELECT * FROM $table_name WHERE order_id = $firstOrder");
+        if(empty($order)){
+            sendMutipleOrderToDellyman($order_id);
+        }else{}
     else:
-        $vendor_id = dokan_get_seller_id_by_order( $order_id );
-        sendOrderToDellyman($order_id , $vendor_id);
+        global $wpdb;
+        $table_name = $wpdb->prefix . "woocommerce_dellyman_orders";
+        $order = $wpdb->get_row("SELECT * FROM $table_name WHERE order_id = $order_id");
+        if(empty($order)){
+            $vendor_id = dokan_get_seller_id_by_order( $order_id );
+            sendOrderToDellyman($order_id , $vendor_id);
+        }
+       
     endif;
 }
-add_action( 'woocommerce_payment_complete', 'post_products_dellyman_request' );
+add_action( 'woocommerce_thankyou', 'post_products_dellyman_request' );
 
 function sendOrderToDellyman($order_id , $vendor_id){
 
@@ -456,8 +521,6 @@ function sendOrderToDellyman($order_id , $vendor_id){
             ) 
         );
         
-        $order = new WC_Order($order_id);
-        $order->update_status("wc-fully-shipped", 'Order moved to fully shipped by delivery', FALSE); 
     }
 
 }
@@ -579,9 +642,6 @@ function sendMutipleOrderToDellyman($order_id){
                         'user_id' => $vendor_id , 
                     ) 
                 );
-                
-                $order = new WC_Order($sub_orders[$key]);
-                $order->update_status("wc-fully-shipped", 'Order moved to fully shipped by delivery', FALSE); 
             }
         }
     }
@@ -611,6 +671,14 @@ register_post_status( 'wc-fully-delivered', array(
     'show_in_admin_all_list'    => true,
     'exclude_from_search'       => false,
     'label_count'               => _n_noop( 'Delivered <span class="count">(%s)</span>', 'Delivered <span class="count">(%s)</span>')
+) );
+register_post_status( 'wc-failed-delivery', array(
+    'label'                     => 'Delivery Cancelled',
+    'public'                    => true,
+    'show_in_admin_status_list' => true,
+    'show_in_admin_all_list'    => true,
+    'exclude_from_search'       => false,
+    'label_count'               => _n_noop( 'Delivery Cancelled <span class="count">(%s)</span>', 'Delivery Cancelled <span class="count">(%s)</span>')
 ) );
 
 }
@@ -646,28 +714,106 @@ function change_status_order(WP_REST_Request $request) {
     $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
     $Web_HookSecret =  (!empty($user->Web_HookSecret)) ? $user->Web_HookSecret : ''; 
     $myKey = hash_hmac('sha256', urldecode($request->get_body()), $Web_HookSecret);
-  
      
     if($key == $myKey){
         //Move order to deliver
         global $wpdb;
         $table_name = $wpdb->prefix . "woocommerce_dellyman_orders"; 
         $body = json_decode(urldecode($request->get_body()),true);
-        error_log(urldecode($request->get_body()));
         $orderID = $body['order']['OrderID'];
         $order = $wpdb->get_row("SELECT * FROM $table_name WHERE dellyman_order_id = ". $orderID);
 
         if($body['order']['OrderStatus'] == "COMPLETED"){
             $order = new WC_Order($order->order_id);
-            $order->update_status("wc-fully-delivered", 'Order moveed to fully delivered', FALSE); 
-        }elseif($body['order']['OrderStatus'] == "CANCELLED"){
-             
+            $order->update_status("wc-fully-delivered", 'Order Delivery by dellyman', FALSE); 
+        }
+        elseif($body['order']['OrderStatus'] == "INTRANSIT"){
+            $order = new WC_Order($order->order_id);
+            $order->update_status("wc-fully-shipped", 'Order Shipped by dellyman', FALSE); 
+        }
+        elseif($body['order']['OrderStatus'] == "CANCELLED"){
+            $order = new WC_Order($order->order_id);
+            $order->update_status("wc-failed-delivery", 'Order Cancelled by dellyman', FALSE); 
+        }
+        elseif($body['order']['OrderStatus'] == "ASSIGNED"){
+            $order = new WC_Order($order->order_id);
+            $order->update_status("wc-ready-to-ship", 'Order moved to Ready to ship by dellyman', FALSE);  
         }
     }else{
-        //echo "Not from dellyman";
+
     }
 
 }
+
+function admin_products_dellyman_request(){
+    if (isset($_POST['order']) AND isset($_POST['products']) AND isset($_POST['carrier']) ) { 
+            extract($_POST);
+          
+            //Get Order Addresss 
+            $order_id = $order;
+            $vendor_id = dokan_get_seller_id_by_order($order);
+            $order = new WC_Order($order); // Order id
+            
+            $shipping_address = $order->get_address('shipping'); 
+
+            //Get product Names
+            $allProductNames = "";
+            foreach ($order->get_items() as $key => $item) {
+                if ($key == 0) {
+                    $allProductNames = preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
+                }else{
+                    $allProductNames = $allProductNames .",". preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
+                }
+            }
+            $productNames = "Total item(s)-". count($order->get_items()) ." Products - " .$allProductNames;
+                
+            //Get Authentciation
+            $store_info = dokan_get_store_info($vendor_id);
+            $store_name = $store_info['store_name'];
+            $store_address = $store_info['address']['street_1'];
+            $store_city = $store_info['address']['city'];
+            $pickupAddress = $store_address .', '. $store_city;
+            $vendorphone = $store_info['phone'];
+            $custPhone =  $order->get_billing_phone();
+            $customer_city = $order->get_billing_city();
+            
+            //send order
+            $feedback = bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickupAddress,$vendorphone,$custPhone, $store_city,$customer_city );
+        
+            if ($feedback['ResponseCode'] == 100) {
+                $dellyman_orderid = $feedback['OrderID'];
+                $Reference = $feedback['Reference'];
+                //Insert into delivery orders in table
+                global $wpdb;
+                $table_name = $wpdb->prefix . "woocommerce_dellyman_orders";
+                $wpdb->insert( 
+                    $table_name, 
+                    array( 
+                        'time' => current_time('mysql'), 
+                        'order_id' => $order_id,
+                        'reference_id' => $Reference,
+                        'dellyman_order_id' => $dellyman_orderid,
+                        'user_id' => $vendor_id, 
+                    ) 
+                );
+
+                $order->update_status("wc-ready-to-ship", 'Order moved to Ready to ship by dellyman', FALSE);
+                
+            }
+       $feedback['orderID'] = $_POST['order'];
+   }else{
+       $feedback = "No product was found";
+    }
+   wp_send_json($feedback);
+   wp_die();
+
+}
+add_action( 'wp_ajax_admin_products_dellyman_request', 'admin_products_dellyman_request' );
+add_action( 'wp_ajax_nopriv_admin_products_dellyman_request', 'admin_products_dellyman_request'); 
+
+
+
+
 // * This function is where we register our routes for our example endpoint.
 // */
 function prefix_register_product_routes() {
@@ -693,6 +839,7 @@ function dokan_add_new_custom_order_status( $order_statuses ) {
     $order_statuses[ 'wc-ready-to-ship' ] = _x( 'Ready to ship', 'Order status', 'text_domain' );
     $order_statuses[ 'wc-fully-shipped' ] = _x( 'Shipped', 'Order status', 'text_domain' );
     $order_statuses[ 'wc-fully-delivered' ] = _x( 'Delivered', 'Order status', 'text_domain' );
+    $order_statuses[ 'wc-failed-delivery' ] = _x( 'Delivery Cancelled', 'Order status', 'text_domain' );
     return $order_statuses;
 }
 
@@ -715,6 +862,9 @@ function dokan_add_custom_order_status_button_class( $text, $status ) {
         case 'wc-fully-delivered':
         case 'fully-delivered':
             $text = 'success';
+        case 'wc-failed-delivery':
+        case 'failed-delivery':
+            $text = 'danger';
         break;        
     }    
     return $text;
@@ -743,6 +893,10 @@ function dokan_add_custom_order_status_translated( $text, $status ) {
         case 'wc-fully-delivered':
         case 'fully-delivered':
             $text = __( 'Delivered', 'text_domain' );
+            break;
+        case 'wc-failed-delivery':
+        case 'failed-delivery':
+            $text = __( 'Delivery Cancelled', 'text_domain' );
             break;         
     }    
     return $text;
