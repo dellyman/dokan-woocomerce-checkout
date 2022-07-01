@@ -524,7 +524,7 @@ function sendOrderToDellyman($order_id , $vendor_id){
     }
 
 }
-
+ 
 
 function sendMutipleOrderToDellyman($order_id){
     $sub_orders = dokan_get_suborder_ids_by($order_id);
@@ -560,7 +560,7 @@ function sendMutipleOrderToDellyman($order_id){
         $date =  date("m/d/Y");
         $single = [
             "CompanyID" => 762,
-            "PaymentMode" => "pickup",
+            "PaymentMode" => "online",
             "Vehicle" => 1,
             "PickUpContactName" => $store_name,
             "PickUpContactNumber" => $vendorphone,
@@ -747,66 +747,126 @@ function change_status_order(WP_REST_Request $request) {
 
 function admin_products_dellyman_request(){
     if (isset($_POST['order']) AND isset($_POST['products']) AND isset($_POST['carrier']) ) { 
-            extract($_POST);
-          
-            //Get Order Addresss 
-            $order_id = $order;
-            $vendor_id = dokan_get_seller_id_by_order($order);
-            $order = new WC_Order($order); // Order id
-            
-            $shipping_address = $order->get_address('shipping'); 
+        extract($_POST);
 
-            //Get product Names
-            $allProductNames = "";
-            foreach ($order->get_items() as $key => $item) {
-                if ($key == 0) {
-                    $allProductNames = preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
-                }else{
-                    $allProductNames = $allProductNames .",". preg_replace("/\'s+/", "", $item->get_name())."(". round($item->get_quantity())  .")";
-                }
+        //Get Order Addresss 
+        $orderid = $order;
+        $vendor_id = dokan_get_seller_id_by_order($order);
+        $order = new WC_Order($order); // Order id
+        $shipping_address = $order->get_address('billing'); 
+        $products =  $_POST['products'];
+
+        //Cycle through products
+        $shipProducts = array();
+        foreach ($products as $key => $jsonproduct) {       
+            $jsonproduct = stripslashes($jsonproduct);
+            $arrayProduct = json_decode($jsonproduct);
+            array_push($shipProducts, $arrayProduct );  
+        }
+
+        //Get product Names
+        $allProductNames = "";
+        foreach ($shipProducts as $key => $shipProduct) {
+            if ($key == 0) {
+                $allProductNames = $shipProduct->product_name."(". round($shipProduct->shipquantity)  .")";
+            }else{
+                $allProductNames = $allProductNames .",". $shipProduct->product_name."(". round($shipProduct->shipquantity) .")";
             }
-            $productNames = "Total item(s)-". count($order->get_items()) ." Products - " .$allProductNames;
-                
-            //Get Authentciation
-            $store_info = dokan_get_store_info($vendor_id);
-            $store_name = $store_info['store_name'];
-            $store_address = $store_info['address']['street_1'];
-            $store_city = $store_info['address']['city'];
-            $pickupAddress = $store_address .', '. $store_city;
-            $vendorphone = $store_info['phone'];
-            $custPhone =  $order->get_billing_phone();
-            $customer_city = $order->get_billing_city();
-            
-            //send order
-            $feedback = bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickupAddress,$vendorphone,$custPhone, $store_city,$customer_city );
+        }
+        $productNames = "Total item(s)-". count($shipProducts) ." Products - " .$allProductNames;
+                 
+        $store_info = dokan_get_store_info($vendor_id);
+        $store_name = $store_info['store_name'];
+        $store_address = $store_info['address']['street_1'];
+        $store_city = $store_info['address']['city'];
+        $pickupAddress = $store_address .', '. $store_city;
+        $vendorphone = $store_info['phone'];
+        $custPhone =  $order->get_billing_phone();
+        $customer_city = $order->get_billing_city();
+        $carrier = "bike";
+
+        //send order
+        $feedback = bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickupAddress,$vendorphone,$custPhone, $store_city,$customer_city );
         
-            if ($feedback['ResponseCode'] == 100) {
-                $dellyman_orderid = $feedback['OrderID'];
-                $Reference = $feedback['Reference'];
-                //Insert into delivery orders in table
+        if ($feedback['ResponseCode'] == 100) {
+            $dellyman_orderid = $feedback['OrderID'];
+            $Reference = $feedback['Reference'];
+            //Insert into delivery orders in table
+            global $wpdb;
+            $table_name = $wpdb->prefix . "woocommerce_dellyman_orders";
+            $wpdb->insert( 
+                $table_name, 
+                array( 
+                    'time' => current_time('mysql'), 
+                    'order_id' => $orderid,
+                    'reference_id' => $Reference,
+                    'dellyman_order_id' =>$dellyman_orderid,
+                    'user_id' => $vendor_id, 
+                ) 
+            );
+            //insert into shipped products
+            foreach ($shipProducts as $key => $item){
                 global $wpdb;
-                $table_name = $wpdb->prefix . "woocommerce_dellyman_orders";
+                $table_name = $wpdb->prefix . "woocommerce_dellyman_shipped_products";
                 $wpdb->insert( 
                     $table_name, 
                     array( 
-                        'time' => current_time('mysql'), 
-                        'order_id' => $order_id,
-                        'reference_id' => $Reference,
-                        'dellyman_order_id' => $dellyman_orderid,
-                        'user_id' => $vendor_id, 
+                        'created_at' => current_time('mysql'), 
+                        'product_id'=>$item->product_id,
+                        'order_id' => $orderid, 
+                        'product_name' => $item->product_name, 
+                        'dellyman_order_id' =>$dellyman_orderid,
+                        'sku' => $item->sku,
+                        'quantity' =>  $item->shipquantity,
+                        'price'=> $item->price
                     ) 
-                );
-
-                $order->update_status("wc-ready-to-ship", 'Order moved to Ready to ship by dellyman', FALSE);
-                
+                ); 
             }
-       $feedback['orderID'] = $_POST['order'];
-   }else{
-       $feedback = "No product was found";
-    }
-   wp_send_json($feedback);
-   wp_die();
 
+            //Update product
+            global $wpdb;
+            $table_name = $wpdb->prefix . "woocommerce_dellyman_products"; 
+            $products = $wpdb->get_results("SELECT * FROM $table_name WHERE order_id = '$orderid'",ARRAY_A);
+
+            foreach ($shipProducts as $key => $ShipProduct) {
+                $mainkey = array_search($ShipProduct->id,array_column($products,'id'));
+                $updatedQty = $products[$mainkey]['quantity'] - $ShipProduct->shipquantity;
+                global $wpdb;
+                $table_name = $wpdb->prefix . "woocommerce_dellyman_products"; 
+                //Update
+                $dbData = array(
+                    'quantity' => $updatedQty, 
+                    'shipquantity' => $ShipProduct->shipquantity
+                );
+                $wpdb->update($table_name, $dbData, array('id' => $shipProduct->id)); 
+            }
+
+            //Update product
+            global $wpdb;
+            $table_name = $wpdb->prefix . "woocommerce_dellyman_products"; 
+            $products = $wpdb->get_results("SELECT * FROM $table_name WHERE order_id = '$orderid'",ARRAY_A);
+            $allQuantity = 0;
+            foreach ($products as $key => $product) {
+                $allQuantity = $allQuantity + $product['quantity'];
+            }
+            
+            if ($allQuantity < 1) {
+                //Change Status
+                $order = new WC_Order($orderid);
+                $order->update_status("wc-ready-to-ship",'Order moved to ready shipped', FALSE); 
+            }else {
+                //Change Status
+                $order = new WC_Order($orderid);
+                $order->update_status("wc-ready-to-ship",'Order moved to ready shipped', FALSE); 
+            }
+        
+        }
+        $feedback['orderID'] = $_POST['order'];
+    }else{
+        $feedback = "No product was found";
+    }
+    wp_send_json($feedback);
+    wp_die();  
 }
 add_action( 'wp_ajax_admin_products_dellyman_request', 'admin_products_dellyman_request' );
 add_action( 'wp_ajax_nopriv_admin_products_dellyman_request', 'admin_products_dellyman_request'); 
