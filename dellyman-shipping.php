@@ -217,7 +217,7 @@ class DellymanOrders extends WP_List_Table
                         $table_name = $wpdb->prefix . "woocommerce_dellyman_credentials"; 
                         $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
                         $ApiKey =  (!empty($user->API_KEY)) ? $user->API_KEY : '';                                        
-                        $response = wp_remote_post( 'https://dev.dellyman.com/api/v3.0/TrackOrder', array(
+                        $response = wp_remote_post( 'https://dellyman.com/api/v3.0/TrackOrder', array(
                             'body'    => json_encode([
                                 'OrderID' => intval($item['dellyman_order_id'])
                             ]),
@@ -377,7 +377,7 @@ function bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickup
 
     $curl = curl_init();
     curl_setopt_array($curl, array(
-    CURLOPT_URL => 'https://dev.dellyman.com/api/v3.0/BookOrder',
+    CURLOPT_URL => 'https://dellyman.com/api/v3.0/BookOrder',
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_ENCODING => '',
     CURLOPT_MAXREDIRS => 10,
@@ -444,13 +444,11 @@ function get_products_ajax_request(){
     }
     wp_die(); 
 }
+
 add_action( 'wp_ajax_get_products_ajax_request', 'get_products_ajax_request' );
-add_action( 'wp_ajax_nopriv_get_products_ajax_request', 'get_products_ajax_request' ); 
-
-
+add_action( 'wp_ajax_nopriv_get_products_ajax_request', 'get_products_ajax_request' );
 
 function post_products_dellyman_request($order_id){
-
     if(!dokan_get_seller_id_by_order( $order_id )):
         $sub_orders = dokan_get_suborder_ids_by($order_id);
         global $wpdb;
@@ -474,7 +472,6 @@ function post_products_dellyman_request($order_id){
 add_action( 'woocommerce_thankyou', 'post_products_dellyman_request' );
 
 function sendOrderToDellyman($order_id , $vendor_id){
-
     //Get Order Addresss 
     $order = new WC_Order($order_id); // Order id
     $shipping_address = $order->get_address('shipping'); 
@@ -497,7 +494,7 @@ function sendOrderToDellyman($order_id , $vendor_id){
     $store_address = $store_info['address']['street_1'];
     $store_city = $store_info['address']['city'];
     $pickupAddress = $store_address .', '. $store_city;
-    $vendorphone = $store_info['phone'];
+    $vendorphone = get_user_meta($vendor_id, 'billing_phone', true);
     $custPhone =  $order->get_billing_phone();
     $customer_city = $order->get_billing_city();
     $carrier = "bike";
@@ -554,14 +551,14 @@ function sendMutipleOrderToDellyman($order_id){
         $store_address = $store_info['address']['street_1'];
         $store_city = $store_info['address']['city'];
         $pickupAddress = $store_address .', '. $store_city;
-        $vendorphone = $store_info['phone'];
+        $vendorphone = get_user_meta($vendor_id, 'billing_phone', true);
         $custPhone =  $order->get_billing_phone();
         $customer_city = $order->get_billing_city();
         $date =  date("m/d/Y");
         $single = [
             "CompanyID" => 762,
             "PaymentMode" => "online",
-            "Vehicle" => 1,
+            "Vehicle" => "Bike",
             "PickUpContactName" => $store_name,
             "PickUpContactNumber" => $vendorphone,
             "PickUpGooglePlaceAddress" => $pickupAddress,
@@ -599,7 +596,7 @@ function sendMutipleOrderToDellyman($order_id){
     $table_name = $wpdb->prefix . "woocommerce_dellyman_credentials"; 
     $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
     $ApiKey =  (!empty($user->API_KEY)) ? ($user->API_KEY) : ('');
-    $response = wp_remote_post("https://dev.dellyman.com/api/v3.0/BookOrders", array(
+    $response = wp_remote_post("https://dellyman.com/api/v3.0/BookOrders", array(
             'method' => 'POST',
             'timeout' => 30,
             'redirection' => 10,
@@ -783,7 +780,7 @@ function admin_products_dellyman_request(){
         $vendorphone = $store_info['phone'];
         $custPhone =  $order->get_billing_phone();
         $customer_city = $order->get_billing_city();
-        $carrier = "bike";
+        $carrier = "Bike";
 
         //send order
         $feedback = bookOrder($carrier,$store_name,$shipping_address, $productNames,$pickupAddress,$vendorphone,$custPhone, $store_city,$customer_city );
@@ -1046,22 +1043,18 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                  
                 $argdata = array(
                     "PaymentMode"                     => "online",
-                    "VehicleID"                       => 1,
+                    "Vehicle"                         => "Bike",
+                    "CustomerID"                      => 2229,
                     "PickupRequestedTime"             => $PickupRequestedTime,
                     "PickupRequestedDate"             => $PickupRequestedDate,
                     "PickupAddress"                   => $pickupAddress,
                     "DeliveryAddress"                 => $DeliveryAddress,
-                    "ProductAmount"                   => 0,
-                    "PackageWeight"                   => "1kg",
-                    "IsProductOrder"                  => 0,
-                    "IsProductInsurance"              => 0,
-                    "InsuranceAmount"                 => 0,
                     "IsInstantDelivery"               => 0,
                 );
                     
                 $data = json_encode($argdata);
                     
-                $response = wp_remote_post("https://dev.dellyman.com/api/v3.0/GetQuotes", array(
+                $response = wp_remote_post("https://dellyman.com/api/v3.0/GetQuotes", array(
                     'method' => 'POST',
                     'timeout' => 30,
                     'redirection' => 10,
@@ -1106,7 +1099,7 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
               public function calculate_shipping( $package = array() ) {
                 
                  
-                $address    = $package["destination"]["address"];
+                $address  = $package["destination"]["address"];
                 $state    = $package["destination"]["state"];
                 $city     = $package["destination"]["city"];  
                 $vendor_id = $package["seller_id"];

@@ -88,7 +88,7 @@
                                         $table_name = $wpdb->prefix . "woocommerce_dellyman_credentials"; 
                                         $user = $wpdb->get_row("SELECT * FROM $table_name WHERE id = 1");
                                         $ApiKey =  (!empty($user->API_KEY)) ? $user->API_KEY : '';                                        
-                                        $response = wp_remote_post( 'https://dev.dellyman.com/api/v3.0/TrackOrder', array(
+                                        $response = wp_remote_post( 'https://dellyman.com/api/v3.0/TrackOrder', array(
                                             'body'    => json_encode([
                                                 'OrderID' => intval($order->dellyman_order_id)
                                             ]),

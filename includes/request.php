@@ -40,7 +40,7 @@
         $table_name = $wpdb->prefix . "dokan_orders"; 
         $orders = $wpdb->get_results("SELECT * FROM $table_name WHERE seller_id = '$seller->ID' AND (order_status = 'wc-processing' OR order_status = 'wc-completed' OR order_status = 'wc-ready-to-ship' OR order_status = 'wc-partially-deliver' OR order_status = 'wc-partially-shipped') ");
         $orders = json_decode(json_encode($orders),true);
-        $response = wp_remote_get( 'https://dev.dellyman.com/api/v3.0/Vehicles' );
+        $response = wp_remote_get( 'https://dellyman.com/api/v3.0/Vehicles' );
         $carriers = wp_remote_retrieve_body( $response );
         ?>
         <div class="my-8">

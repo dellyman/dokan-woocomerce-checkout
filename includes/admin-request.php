@@ -7,7 +7,7 @@
         $orders = $wpdb->get_results("SELECT order_id FROM $table_name WHERE status = 'wc-failed-delivery' UNION       
         SELECT order_id FROM $table_name2  WHERE order_status = 'wc-failed-delivery'");
         $orders = json_decode(json_encode($orders),true);
-        $response = wp_remote_get('https://dev.dellyman.com/api/v3.0/Vehicles');
+        $response = wp_remote_get('https://dellyman.com/api/v3.0/Vehicles');
         $carriers = wp_remote_retrieve_body( $response );
         ?>
         <div class="mt-8">
