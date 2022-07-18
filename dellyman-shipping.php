@@ -148,7 +148,8 @@ class DellymanOrders extends WP_List_Table
                   'cb'            => '<input type="checkbox" />',
                   'order_id' => 'Order id',
                   'reference_id'    => 'Dellyman order id',
-                  'store_name'    => 'Store',
+                  'store_name'    => 'Vendor Name',
+                  'vendor_email'    => 'Vendor Email',
                   'item'      => 'Items',
                   'status' => 'Status',
                   'time' => 'Created'
@@ -197,8 +198,14 @@ class DellymanOrders extends WP_List_Table
                         return $item[$column_name];
                   case  'store_name';
                         $dokan_id = $item['user_id'];
-                        $store_info = dokan_get_store_info($dokan_id);
-                        return $store_info['store_name'];
+                        $fname = get_user_meta(  $dokan_id, 'first_name', true );
+                        $lname = get_user_meta(  $dokan_id, 'last_name', true );
+                        $store_name = $fname ." ".$lname;
+                        return $store_name;
+                  case 'vendor_email';
+                        $dokan_id = $item['user_id'];
+                        $the_user = get_user_by('id', $dokan_id); // 54 is a user ID
+                        return $the_user->user_email;
                   case 'item':
                         $order = new WC_Order($item['order_id']); // Order id
                         //Get product Names
@@ -488,11 +495,11 @@ function sendOrderToDellyman($order_id , $vendor_id){
     $productNames = "Total item(s)-". count($order->get_items()) ." Products - " .$allProductNames;
         
     //Get Authentciation
-   
-    $store_info = dokan_get_store_info($vendor_id);
-    $store_name = $store_info['store_name'];
-    $store_address = $store_info['address']['street_1'];
-    $store_city = $store_info['address']['city'];
+    $fname = get_user_meta( $vendor_id, 'first_name', true );
+    $lname = get_user_meta( $vendor_id, 'last_name', true );
+    $store_name = $fname ." ".$lname;
+    $store_address = get_user_meta($vendor_id, 'billing_address_1', true );
+    $store_city = get_user_meta($vendor_id, 'billing_city', true );
     $pickupAddress = $store_address .', '. $store_city;
     $vendorphone = get_user_meta($vendor_id, 'billing_phone', true);
     $custPhone =  $order->get_billing_phone();
@@ -545,11 +552,11 @@ function sendMutipleOrderToDellyman($order_id){
         $productNames = "Total item(s)-". count($order->get_items()) ." Products - " .$allProductNames;
             
         //Get Authentciation
-       
-        $store_info = dokan_get_store_info($vendor_id);
-        $store_name = $store_info['store_name'];
-        $store_address = $store_info['address']['street_1'];
-        $store_city = $store_info['address']['city'];
+        $fname = get_user_meta( $vendor_id, 'first_name', true );
+        $lname = get_user_meta( $vendor_id, 'last_name', true );
+        $store_name = $fname ." ".$lname;
+        $store_address = get_user_meta($vendor_id, 'billing_address_1', true );
+        $store_city = get_user_meta($vendor_id, 'billing_city', true );
         $pickupAddress = $store_address .', '. $store_city;
         $vendorphone = get_user_meta($vendor_id, 'billing_phone', true);
         $custPhone =  $order->get_billing_phone();
@@ -772,10 +779,11 @@ function admin_products_dellyman_request(){
         }
         $productNames = "Total item(s)-". count($shipProducts) ." Products - " .$allProductNames;
                  
-        $store_info = dokan_get_store_info($vendor_id);
-        $store_name = $store_info['store_name'];
-        $store_address = $store_info['address']['street_1'];
-        $store_city = $store_info['address']['city'];
+        $fname = get_user_meta( $vendor_id, 'first_name', true );
+        $lname = get_user_meta( $vendor_id, 'last_name', true );
+        $store_name = $fname ." ".$lname;
+        $store_address = get_user_meta($vendor_id, 'billing_address_1', true );
+        $store_city = get_user_meta($vendor_id, 'billing_city', true );
         $pickupAddress = $store_address .', '. $store_city;
         $vendorphone = $store_info['phone'];
         $custPhone =  $order->get_billing_phone();
@@ -1104,9 +1112,8 @@ if ( in_array( 'woocommerce/woocommerce.php', apply_filters( 'active_plugins', g
                 $city     = $package["destination"]["city"];  
                 $vendor_id = $package["seller_id"];
 
-                $store_info = dokan_get_store_info($vendor_id);
-                $store_address = $store_info['address']['street_1'];
-                $store_city = $store_info['address']['city'];
+                $store_address = get_user_meta($vendor_id, 'billing_address_1', true );
+                $store_city = get_user_meta($vendor_id, 'billing_city', true );
                 $pickupAddress = $store_address .', '. $store_city;
 
                 $DeliveryAddress        = array($address.','.$city.','.$state);
